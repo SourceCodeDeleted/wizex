@@ -15,6 +15,7 @@ resource "aws_s3_account_public_access_block" "account" {
 
 resource "aws_s3_bucket" "mongo_backups" {
   bucket = "wiz-bucket-${random_id.bucket_suffix.hex}"  # must be globally unique
+  force_destroy = true  # to allow deletion even if not empty
 
   tags = {
     Name = "wiz-mongo-backups"
@@ -23,6 +24,7 @@ resource "aws_s3_bucket" "mongo_backups" {
 
 resource "aws_s3_bucket_public_access_block" "bucket_unblock_public" {
   bucket = aws_s3_bucket.mongo_backups.id
+  
 
   block_public_acls       = false
   block_public_policy     = false

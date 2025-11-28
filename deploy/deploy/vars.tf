@@ -1,11 +1,4 @@
 
-
-# variable "backup_bucket_name" {
-#   description = "Name of the S3 bucket used for MongoDB backups."
-#   type        = string
-# }
-
-
 variable "k8s_private_subnets" {
   description = "List of private subnet CIDRs for the Kubernetes cluster."
   type        = list(string)

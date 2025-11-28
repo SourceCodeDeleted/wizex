@@ -68,3 +68,9 @@ output "ssh_command" {
   description = "Command to SSH into the MongoDB instance"
   value       = "ssh -i my-ec2-key.pem ubuntu@${aws_instance.mongodb.public_ip}"
 }
+
+output "deploy_pod" {
+  description = "Command to SSH into the MongoDB instance"
+  value       = "ssh -i my-ec2-key.pem ubuntu@${aws_instance.mongodb.public_ip}"
+}
+

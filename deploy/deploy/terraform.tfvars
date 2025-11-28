@@ -1,3 +1,4 @@
+my_public_ip = "94.43.243.57/32"
 
 k8s_private_subnets = [
   "10.0.2.0/24",
