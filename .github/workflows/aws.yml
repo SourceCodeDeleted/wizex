@@ -2,20 +2,20 @@ name: Deploy Wiz Exercise
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
+    branches: [master]
   workflow_dispatch:
 
 env:
   AWS_REGION: us-east-1
-  TF_VERSION: 1.6.0
+  TF_VERSION: 1.14.0
 
 jobs:
   deploy:
     name: Deploy Infrastructure and Application
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -60,7 +60,7 @@ jobs:
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
         with:
-          version: 'v1.28.0'
+          version: "v1.28.0"
 
       - name: Configure kubectl
         run: |
