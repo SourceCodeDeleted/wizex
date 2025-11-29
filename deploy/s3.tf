@@ -25,23 +25,26 @@ resource "aws_s3_bucket" "mongo_backups" {
 resource "aws_s3_bucket_public_access_block" "bucket_unblock_public" {
   bucket = aws_s3_bucket.mongo_backups.id
   
-
   block_public_acls       = false
   block_public_policy     = false
   ignore_public_acls      = false
   restrict_public_buckets = false
+
+  # Wait for account-level settings first
+  depends_on = [
+    aws_s3_account_public_access_block.account
+  ]
 }
 
 # Public policy (intentionally insecure)
 resource "aws_s3_bucket_policy" "public_policy" {
   bucket = aws_s3_bucket.mongo_backups.id
 
-
-  # this needs to be created first before applying the policy
+  # Wait for BOTH account-level AND bucket-level settings
   depends_on = [
-    aws_s3_account_public_access_block.account
+    aws_s3_account_public_access_block.account,
+    aws_s3_bucket_public_access_block.bucket_unblock_public
   ]
-
 
   policy = jsonencode({
     Version = "2012-10-17"
