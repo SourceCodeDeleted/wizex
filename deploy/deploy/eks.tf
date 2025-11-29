@@ -34,16 +34,6 @@ output "eks_cluster_name" {
   description = "EKS cluster name"
 }
 
-output "eks_cluster_endpoint" {
-  value       = aws_eks_cluster.eks.endpoint
-  description = "EKS cluster API server endpoint"
-}
-
-output "eks_cluster_ca" {
-  value       = aws_eks_cluster.eks.certificate_authority[0].data
-  description = "EKS cluster CA data"
-  sensitive   = true
-}
 
 output "eks_nodegroup_name" {
   value       = aws_eks_node_group.default.node_group_name

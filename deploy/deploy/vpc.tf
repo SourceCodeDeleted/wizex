@@ -134,31 +134,3 @@ resource "aws_route_table_association" "private_b_assoc" {
   route_table_id = aws_route_table.private.id
 }
 
-###############################################
-# Outputs
-###############################################
-output "vpc_id" {
-  value       = aws_vpc.main.id
-  description = "VPC ID"
-}
-
-output "public_subnet_id" {
-  value       = aws_subnet.public.id
-  description = "Public subnet for MongoDB"
-}
-
-output "private_subnet_ids" {
-  value = [
-    aws_subnet.private_a.id,
-    aws_subnet.private_b.id
-  ]
-  description = "Private subnets for EKS"
-}
-
-output "k8s_private_subnets_cidr" {
-  value = [
-    aws_subnet.private_a.cidr_block,
-    aws_subnet.private_b.cidr_block
-  ]
-  description = "CIDR blocks of K8s private subnets"
-}

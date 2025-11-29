@@ -20,7 +20,7 @@ spec:
             - containerPort: 8080
           env:
             - name: MONGODB_URI
-              value: mongodb://root:example@10.0.1.124:27017/admin?authSource=admin
+              value: mongodb://root:example@PRIVATE_IP:27017/admin?authSource=admin
             - name: SECRET_KEY
               value: "supersecret123"
           resources:

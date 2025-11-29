@@ -21,38 +21,32 @@ curl -fsSL https://pgp.mongodb.com/server-7.0.asc | gpg -o /usr/share/keyrings/m
 echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" > /etc/apt/sources.list.d/mongodb-org-7.0.list
 apt-get update -y
 apt-get install -y mongodb-org
-
-# Enable remote access
-sed -i 's/bindIp: .*/bindIp: 0.0.0.0/' /etc/mongod.conf
 systemctl enable mongod
 systemctl start mongod
 
-# Create root user
-mongo <<EOF2
-use admin
-db.createUser({
-  user: "root",
-  pwd: "example",
-  roles: [ { role: "root", db: "admin" } ]
-})
-EOF2
+sleep 10
+mongosh admin --eval 'db.createUser({ user: "root", pwd: "example", roles: [ { role: "root", db: "admin" } ] })'
 
 # Create backup script
-cat << 'SCRIPT' > /usr/local/bin/mongo_backup.sh
+cat << SCRIPT > /usr/local/bin/mongo_backup.sh
 #!/bin/bash
-TIMESTAMP=$(date +%Y-%m-%d_%H-%M)
-BACKUP_DIR="/tmp/mongo_backup_$TIMESTAMP"
 
-mongodump --out "$BACKUP_DIR"
-tar -czf "$BACKUP_DIR.tar.gz" "$BACKUP_DIR"
-aws s3 cp "$BACKUP_DIR.tar.gz" s3://${local.bucket_name}/mongo-backups/mongo_$TIMESTAMP.tar.gz
-rm -rf "$BACKUP_DIR" "$BACKUP_DIR.tar.gz"
+TIMESTAMP=$(date +%Y-%m-%d_%H-%M)
+BACKUP_DIR="/tmp/mongo_backup_\$TIMESTAMP"
+
+mongodump --out "\$BACKUP_DIR"
+tar -czf "\$BACKUP_DIR.tar.gz" "\$BACKUP_DIR"
+
+aws s3 cp "\$BACKUP_DIR.tar.gz" s3://${local.bucket_name}/mongo-backups/mongo_\$TIMESTAMP.tar.gz
+
+rm -rf "\$BACKUP_DIR" "\$BACKUP_DIR.tar.gz"
 SCRIPT
 
 chmod +x /usr/local/bin/mongo_backup.sh
 
 echo "*/5 * * * * root /usr/local/bin/mongo_backup.sh >> /var/log/mongo_backup.log 2>&1" >> /etc/crontab
 systemctl restart cron
+
 EOF
 
   metadata_options {
@@ -69,8 +63,12 @@ output "ssh_command" {
   value       = "ssh -i my-ec2-key.pem ubuntu@${aws_instance.mongodb.public_ip}"
 }
 
-output "deploy_pod" {
-  description = "Command to SSH into the MongoDB instance"
-  value       = "ssh -i my-ec2-key.pem ubuntu@${aws_instance.mongodb.public_ip}"
+output "mongodb_private_ip" {
+  description = "Private IP for K8s connection"
+  value       = aws_instance.mongodb.private_ip
 }
 
+output "mongodb_uri" {
+  description = "MongoDB connection URI"
+  value       = "mongodb://root:example@${aws_instance.mongodb.private_ip}:27017"
+}
