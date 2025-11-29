@@ -133,3 +133,25 @@ jobs:
           echo "  kubectl logs -l app=wizercise"
           echo "  kubectl get svc wizercise-service"
           echo ""
+
+      # CLEANUP ON FAILURE
+      - name: Cleanup - Destroy Infrastructure on Failure
+        if: failure()
+        working-directory: ./deploy
+        run: |
+          echo "❌ Deployment failed! Running terraform destroy to cleanup..."
+          echo ""
+
+          # Try to delete Kubernetes resources first (if they were created)
+          echo "🧹 Cleaning up Kubernetes resources..."
+          kubectl delete -f ../kubernetes/frontent.yaml --ignore-not-found=true || true
+
+          # Wait a bit for cleanup
+          sleep 30
+
+          # Destroy Terraform infrastructure
+          echo "🗑️ Destroying Terraform infrastructure..."
+          terraform destroy -auto-approve
+
+          echo ""
+          echo "✅ Cleanup complete. All resources destroyed."
