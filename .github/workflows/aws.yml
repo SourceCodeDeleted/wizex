@@ -1,0 +1,139 @@
+name: Deploy Wiz Exercise
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.6.0
+
+jobs:
+  deploy:
+    name: Deploy Infrastructure and Application
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        working-directory: ./deploy
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: ./deploy
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ./deploy
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ./deploy
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get MongoDB Private IP
+        id: mongo-ip
+        working-directory: ./deploy
+        run: |
+          MONGO_IP=$(terraform output -raw mongodb_private_ip)
+          echo "ip=$MONGO_IP" >> $GITHUB_OUTPUT
+          echo "MongoDB Private IP: $MONGO_IP"
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name wiz-eks
+          kubectl version --client
+
+      - name: Wait for EKS nodes
+        run: |
+          echo "⏳ Waiting for nodes to be ready..."
+          kubectl wait --for=condition=Ready nodes --all --timeout=600s
+          kubectl get nodes
+
+      - name: Create MongoDB ConfigMap
+        run: |
+          kubectl create configmap mongodb-config \
+            --from-literal=uri="mongodb://root:example@${{ steps.mongo-ip.outputs.ip }}:27017/admin?authSource=admin" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "✅ ConfigMap created with MongoDB IP: ${{ steps.mongo-ip.outputs.ip }}"
+
+      - name: Deploy Application
+        run: |
+          kubectl apply -f deploy/deploy/kubernetes/frontend.yml
+          echo "✅ Application deployed"
+
+      - name: Wait for Deployment
+        run: |
+          kubectl rollout status deployment/wizercise --timeout=600s
+          echo "✅ Deployment ready"
+
+      - name: Get Deployment Status
+        run: |
+          echo "📊 Pods:"
+          kubectl get pods -l app=wizercise
+          echo ""
+          echo "🔧 Service:"
+          kubectl get svc wizercise
+
+      - name: Wait for LoadBalancer URL
+        id: loadbalancer
+        run: |
+          echo "⏳ Waiting for LoadBalancer..."
+          for i in {1..30}; do
+            LB_URL=$(kubectl get svc wizercise -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "$LB_URL" ]; then
+              echo "url=$LB_URL" >> $GITHUB_OUTPUT
+              echo "✅ LoadBalancer ready: $LB_URL"
+              break
+            fi
+            echo "  Waiting... ($i/30)"
+            sleep 10
+          done
+
+      - name: Display Summary
+        run: |
+          echo "======================================================"
+          echo "✅ DEPLOYMENT COMPLETE!"
+          echo "======================================================"
+          echo ""
+          echo "MongoDB IP: ${{ steps.mongo-ip.outputs.ip }}"
+          echo "Frontend URL: http://${{ steps.loadbalancer.outputs.url }}"
+          echo ""
+          echo "🧪 Test the application:"
+          echo "  curl http://${{ steps.loadbalancer.outputs.url }}/"
+          echo ""
+
+      - name: Comment on PR (if applicable)
+        if: github.event_name == 'pull_request' && steps.loadbalancer.outputs.url != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🚀 Deployment Complete!\n\n**Frontend URL:** http://${{ steps.loadbalancer.outputs.url }}\n\n**MongoDB IP:** ${{ steps.mongo-ip.outputs.ip }}`
+            })
