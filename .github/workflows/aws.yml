@@ -66,6 +66,7 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name wiz-eks
           kubectl version --client
+          kubectl cluster-info
 
       - name: Wait for EKS nodes
         run: |
@@ -73,16 +74,17 @@ jobs:
           kubectl wait --for=condition=Ready nodes --all --timeout=600s
           kubectl get nodes
 
-      - name: Create MongoDB ConfigMap
+      - name: Update frontend.yaml with MongoDB IP
         run: |
-          kubectl create configmap mongodb-config \
-            --from-literal=uri="mongodb://root:example@${{ steps.mongo-ip.outputs.ip }}:27017/admin?authSource=admin" \
-            --dry-run=client -o yaml | kubectl apply -f -
-          echo "✅ ConfigMap created with MongoDB IP: ${{ steps.mongo-ip.outputs.ip }}"
+          # Replace PRIVATE_IP with actual MongoDB IP in the kubernetes manifest
+          sed -i "s/PRIVATE_IP/${{ steps.mongo-ip.outputs.ip }}/g" kubernetes/frontent.yaml
+
+          echo "Updated kubernetes/frontent.yaml:"
+          grep "MONGODB_URI" kubernetes/frontent.yaml
 
       - name: Deploy Application
         run: |
-          kubectl apply -f deploy/deploy/kubernetes/frontend.yml
+          kubectl apply -f kubernetes/frontent.yaml
           echo "✅ Application deployed"
 
       - name: Wait for Deployment
@@ -96,14 +98,14 @@ jobs:
           kubectl get pods -l app=wizercise
           echo ""
           echo "🔧 Service:"
-          kubectl get svc wizercise
+          kubectl get svc wizercise-service
 
       - name: Wait for LoadBalancer URL
         id: loadbalancer
         run: |
           echo "⏳ Waiting for LoadBalancer..."
           for i in {1..30}; do
-            LB_URL=$(kubectl get svc wizercise -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            LB_URL=$(kubectl get svc wizercise-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
             if [ -n "$LB_URL" ]; then
               echo "url=$LB_URL" >> $GITHUB_OUTPUT
               echo "✅ LoadBalancer ready: $LB_URL"
@@ -119,21 +121,15 @@ jobs:
           echo "✅ DEPLOYMENT COMPLETE!"
           echo "======================================================"
           echo ""
-          echo "MongoDB IP: ${{ steps.mongo-ip.outputs.ip }}"
-          echo "Frontend URL: http://${{ steps.loadbalancer.outputs.url }}"
+          echo "📋 Deployment Info:"
+          echo "  MongoDB Private IP: ${{ steps.mongo-ip.outputs.ip }}"
+          echo "  Frontend URL:       http://${{ steps.loadbalancer.outputs.url }}"
           echo ""
           echo "🧪 Test the application:"
           echo "  curl http://${{ steps.loadbalancer.outputs.url }}/"
           echo ""
-
-      - name: Comment on PR (if applicable)
-        if: github.event_name == 'pull_request' && steps.loadbalancer.outputs.url != ''
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `## 🚀 Deployment Complete!\n\n**Frontend URL:** http://${{ steps.loadbalancer.outputs.url }}\n\n**MongoDB IP:** ${{ steps.mongo-ip.outputs.ip }}`
-            })
+          echo "🔧 Useful commands:"
+          echo "  kubectl get pods"
+          echo "  kubectl logs -l app=wizercise"
+          echo "  kubectl get svc wizercise-service"
+          echo ""
