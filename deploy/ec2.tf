@@ -24,6 +24,9 @@ apt-get install -y mongodb-org
 systemctl enable mongod
 systemctl start mongod
 
+# set MongoDB to listen on all interfaces
+sudo sed -i 's/bindIp: 127.0.0.1/bindIp: 0.0.0.0/' /etc/mongod.conf
+
 sleep 10
 mongosh admin --eval 'db.createUser({ user: "root", pwd: "example", roles: [ { role: "root", db: "admin" } ] })'
 
