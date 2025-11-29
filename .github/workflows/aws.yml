@@ -46,10 +46,26 @@ jobs:
         run: terraform plan -out=tfplan
 
       - name: Terraform Apply
+        id: terraform-apply
         working-directory: ./deploy
         run: terraform apply -auto-approve tfplan
+        continue-on-error: true
+
+      - name: Check Terraform Apply Result
+        if: steps.terraform-apply.outcome == 'failure'
+        working-directory: ./deploy
+        run: |
+          echo "ERROR: Terraform apply failed"
+          echo "Checking for partial infrastructure..."
+
+          terraform show
+
+          echo ""
+          echo "Will destroy partial infrastructure in cleanup step..."
+          exit 1
 
       - name: Get MongoDB Private IP
+        if: steps.terraform-apply.outcome == 'success'
         id: mongo-ip
         working-directory: ./deploy
         run: |
@@ -58,57 +74,63 @@ jobs:
           echo "MongoDB Private IP: $MONGO_IP"
 
       - name: Install kubectl
+        if: steps.terraform-apply.outcome == 'success'
         uses: azure/setup-kubectl@v3
         with:
           version: "v1.28.0"
 
       - name: Configure kubectl
+        if: steps.terraform-apply.outcome == 'success'
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name wiz-eks
           kubectl version --client
           kubectl cluster-info
 
       - name: Wait for EKS nodes
+        if: steps.terraform-apply.outcome == 'success'
         run: |
-          echo "⏳ Waiting for nodes to be ready..."
+          echo "Waiting for nodes to be ready..."
           kubectl wait --for=condition=Ready nodes --all --timeout=600s
           kubectl get nodes
 
       - name: Update frontend.yaml with MongoDB IP
+        if: steps.terraform-apply.outcome == 'success'
         run: |
-          # Replace PRIVATE_IP with actual MongoDB IP in the kubernetes manifest
           sed -i "s/PRIVATE_IP/${{ steps.mongo-ip.outputs.ip }}/g" kubernetes/frontent.yaml
-
           echo "Updated kubernetes/frontent.yaml:"
           grep "MONGODB_URI" kubernetes/frontent.yaml
 
       - name: Deploy Application
+        if: steps.terraform-apply.outcome == 'success'
         run: |
           kubectl apply -f kubernetes/frontent.yaml
-          echo "✅ Application deployed"
+          echo "Application deployed"
 
       - name: Wait for Deployment
+        if: steps.terraform-apply.outcome == 'success'
         run: |
           kubectl rollout status deployment/wizercise --timeout=600s
-          echo "✅ Deployment ready"
+          echo "Deployment ready"
 
       - name: Get Deployment Status
+        if: steps.terraform-apply.outcome == 'success'
         run: |
-          echo "📊 Pods:"
+          echo "Pods:"
           kubectl get pods -l app=wizercise
           echo ""
-          echo "🔧 Service:"
+          echo "Service:"
           kubectl get svc wizercise-service
 
       - name: Wait for LoadBalancer URL
+        if: steps.terraform-apply.outcome == 'success'
         id: loadbalancer
         run: |
-          echo "⏳ Waiting for LoadBalancer..."
+          echo "Waiting for LoadBalancer..."
           for i in {1..30}; do
             LB_URL=$(kubectl get svc wizercise-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
             if [ -n "$LB_URL" ]; then
               echo "url=$LB_URL" >> $GITHUB_OUTPUT
-              echo "✅ LoadBalancer ready: $LB_URL"
+              echo "LoadBalancer ready: $LB_URL"
               break
             fi
             echo "  Waiting... ($i/30)"
@@ -116,42 +138,64 @@ jobs:
           done
 
       - name: Display Summary
+        if: steps.terraform-apply.outcome == 'success'
         run: |
           echo "======================================================"
-          echo "✅ DEPLOYMENT COMPLETE!"
+          echo "DEPLOYMENT COMPLETE"
           echo "======================================================"
           echo ""
-          echo "📋 Deployment Info:"
+          echo "Deployment Info:"
           echo "  MongoDB Private IP: ${{ steps.mongo-ip.outputs.ip }}"
           echo "  Frontend URL:       http://${{ steps.loadbalancer.outputs.url }}"
           echo ""
-          echo "🧪 Test the application:"
+          echo "Test the application:"
           echo "  curl http://${{ steps.loadbalancer.outputs.url }}/"
           echo ""
-          echo "🔧 Useful commands:"
+          echo "Useful commands:"
           echo "  kubectl get pods"
           echo "  kubectl logs -l app=wizercise"
           echo "  kubectl get svc wizercise-service"
           echo ""
 
-      # CLEANUP ON FAILURE
-      - name: Cleanup - Destroy Infrastructure on Failure
+      - name: Cleanup - Destroy Partial/Failed Infrastructure
         if: failure()
         working-directory: ./deploy
         run: |
-          echo "❌ Deployment failed! Running terraform destroy to cleanup..."
+          echo "======================================================"
+          echo "CLEANUP: Destroying infrastructure after failure"
+          echo "======================================================"
           echo ""
 
-          # Try to delete Kubernetes resources first (if they were created)
-          echo "🧹 Cleaning up Kubernetes resources..."
-          kubectl delete -f ../kubernetes/frontent.yaml --ignore-not-found=true || true
+          echo "Attempting to clean up Kubernetes resources..."
+          kubectl delete -f ../kubernetes/frontent.yaml --ignore-not-found=true 2>/dev/null || true
 
-          # Wait a bit for cleanup
+          echo ""
+          echo "Waiting 30 seconds for Kubernetes cleanup..."
           sleep 30
 
-          # Destroy Terraform infrastructure
-          echo "🗑️ Destroying Terraform infrastructure..."
+          echo ""
+          echo "Running terraform destroy..."
+          echo "This will clean up any partially created infrastructure."
+          echo ""
+
+          terraform refresh || true
+
           terraform destroy -auto-approve
 
+          EXIT_CODE=$?
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo ""
+            echo "Cleanup successful - all resources destroyed"
+          else
+            echo ""
+            echo "WARNING: Cleanup encountered issues (exit code: $EXIT_CODE)"
+            echo "Some resources may need manual cleanup."
+            echo ""
+            echo "To manually clean up, run:"
+            echo "  cd deploy"
+            echo "  terraform destroy"
+          fi
+
           echo ""
-          echo "✅ Cleanup complete. All resources destroyed."
+          echo "======================================================"
